@@ -1,3 +1,139 @@
+# H22: Reputational Insurance Contracts
+
+These are the contracts that are in current development for H22.
+
+This is the main contract that you will be interacting with.
+
+```
+TIMELOCKSTAKABLEPROJECT_CONTRACT_ID=0.0.34353158
+```
+
+You may also use this make command to deploy the contract, seed projects, then run the tests. 
+
+```
+make deploy-test-timelockstakable-contract
+```
+
+*Currently we are having issues with our subscription/oracle tests*
+
+## Understand the staking flow:
+
+All of these methods and examples are within the main test for the contract.
+
+A user connects to the contract through a dapp, they need to have tokens in order to stake:
+
+Call the contract method **claimDemoTokensForStaking** with the amount that you require, you must ask for tokens with the 8 decimal places of the token.
+
+So:
+
+```javascript
+  const tDovExp = 10 ** 8; // exponent with 8 dp
+  const amount = 10 * tDovExp; // for depositing, staking and unstaking
+
+  const response = await hashgraph.contract.call({
+    contractId: contractId,
+    method: "claimDemoTokensForStaking",
+    params: new ContractFunctionParameters()
+            .addInt64(amount)
+  })
+```
+
+Currently, the maximum amount of tokens a user can claim is the "amount" above. If this becomes more of an issue I will remove that requirement dependency from the contract.
+
+## Staking to a project
+
+A user can only have single active StakingPosition with any given project at one time, Will have to close the position in order to reopen one on the same project.
+
+Their contract has been seeded with these projects in **hardhat.config.js**:
+
+```javascript
+    try {
+      // TODO: In the future the project name and address will refer to the actual project and the token ID
+      await addProject('farm-one', 1000)
+      await addProject('farm-two', 2000)
+      await addProject('farm-three', 3000)
+    } catch (e) {
+      console.warn('If you are seeing this these projects have already been deployed onto the contract');
+    }
+```
+
+Use any of the names to stake "tokens (test DOV)" to a project. The method **stakeTokensToProject** provides an example of staking. In this case there are three items, the account ID all the reference to a project, the amount of tokens to stake, and the amount of days to stake for.
+
+```javascript
+    const response = await hashgraph.contract.call({
+      contractId: contractId,
+      method: "stakeTokensToProject",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+        .addInt64(4 * tDovExp)
+        .addUint256(364) //days
+    })
+```
+
+#### Important, when are use the stakes the contract will take a fee of 5% of initial capital. (We will reduce this later)
+
+## Unstaking to a project
+
+You can unstake to a project with **unstakeTokensFromProject** Please note there are two outcomes for a given user.
+
+1) If a user decides to end before the deadline, based off the amount of days they chose, they will lose 80% of their capital.
+2) If a user and steaks after their days have cleared they will receive their capital back plus a bonus of 25% APY
+
+*See all examples in the tests.*
+
+When you unstake, it ends the staking position and there is no extra parameters for an amount.
+
+```javascript
+    const response = await hashgraph.contract.call({
+      contractId: contractId,
+      method: "endStakeToProject",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+    })
+```
+
+## Viewing details of a current position
+
+Call this contract method **getStakedPosition** to return data on how many days remaining when a staked position will end and how much is currently being staked.
+
+```javascript
+    const response = await hashgraph.contract.query({
+      contractId: contractId,
+      method: "getStakedPosition",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+    })
+```
+
+Can also call this method **numberOfTokensStakedToProject** to show all of the tokens that are staked to a project
+
+```javascript
+    const response = await hashgraph.contract.query({
+      contractId: contractId,
+      method: "numberOfTokensStakedToProject",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+    })
+```
+
+## Demo purposes, time travel to remove the timelock
+
+Part of the demo users may disable the time lock after they have a Staked Position, Can do so by calling this method **removeTimelockForProject**.
+
+
+```javascript
+    const response = await hashgraph.contract.call({
+      contractId: contractId,
+      method: "removeTimelockForProject",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+    })
+```
+
+
+
+See more tales of the contract deployment flow of the parents tooling repository. 
+
 # Hedera Smart Contract deployments and testing 
 
 This is some simple tooling that you can utilise to start to work with Hedera Smart contracts, in particular:
