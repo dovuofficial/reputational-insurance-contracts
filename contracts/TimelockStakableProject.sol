@@ -21,15 +21,19 @@ import "./StakableFees.sol";
 */
 contract TimelockStakableProject is HederaTokenService, Ownable {
 
-
-    // This is the basic fees contract
-    StakableFees internal fees = new StakableFees();
-
     // TODO: Become external, so that it can be imported
     struct Project {
         int64 balance;
         int64 verified_kgs; // We might add some claimable carbon
         bool created;
+    }
+
+    struct StakedPosition {
+        int64 amount;
+        int64 amount_on_end;
+        uint number_of_days;
+        uint unlock_time;
+        bool open;
     }
 
     /** @notice Events **/
@@ -43,6 +47,9 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
     // When the staking pool has been updated with tokens (fees, penalties, etc)
     event TreasuryDeposit(address indexed sender, int64 amount);
 
+    // This is the basic fees contract
+    StakableFees internal fees = new StakableFees();
+
     // Links a Dynamic NFT (dNFT) HTS token id to a project within the contract
     mapping (string => Project) projects;
 
@@ -52,8 +59,8 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
     // This is the token address for a demo token, that can be claimed and staked/unstaked
     address tokenAddress;
 
-    // This is the quantity of tokens that different users to specific projects (dnft_id_)
-    mapping (string => mapping (address => int64)) sentTokens;
+    // This represents a given state position towards a project
+    mapping (string => mapping (address => StakedPosition)) stakedProjectPositions;
 
     // Total claimed tokens by user, TODO: add note on why it doesn't reduce.
     // As a user can externally receive tokens for staking
@@ -63,7 +70,7 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
     int64 treasuryTokens = 0;
 
     // This is the amount of claimable tokens that a user can claim with (doesn't stop HTS transfers)
-    // 10 tokens with 8 decimals places.
+    // 10 tokens with 8 decimals places. (updating claimable tokens requires calculation for owner calls)
     int64 maximumClaimableTokens = 10 * 10 ** 8;
 
     /** Modifier Methods **/
@@ -169,14 +176,18 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
         @param dnft_id_: the id of the entity that reputation energy (tokens) staked on it
         @param amount_: the amount of tokens to remove (will revert if the balance of the user is too low)
     **/
-    function stakeTokensToProject(string memory dnft_id_, int64 amount_) external hasProject(dnft_id_) {
+    function stakeTokensToProject(string memory dnft_id_, int64 amount_, uint numberOfDays_) external hasProject(dnft_id_) {
+        require(numberOfDays_ > 0, "You need to set a duration longer than zero days.");
+        require(!stakedProjectPositions[dnft_id_][msg.sender].open, "You need closed or empty staked position");
 
-        int64 _fee = amount_ / fees.getPreStakeFee();
+        int64 _fee = amount_ * fees.getPreStakeFee() / 100;
         int64 _staked = amount_ - _fee;
 
         // Update token state for different projects
         projects[dnft_id_].balance += _staked;
-        sentTokens[dnft_id_][msg.sender] += _staked;
+
+        // Create a new "position" for staking on a project
+        stakedProjectPositions[dnft_id_][msg.sender] = StakedPosition(_staked, 0, numberOfDays_, block.timestamp + numberOfDays_ * 1 days, true);
 
         treasuryTokens += _fee;
 
@@ -191,26 +202,54 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
     }
 
     /**
-        @notice unstake tokens from a contract back to the account of a user
+        @notice end the stake tokens from a contract back to the account of a user
+
+        There are two outcomes using this method:
+        1) If a user unstakes and their "timelock" has not expired they will lose 80% of capital
+        2) If a user exits after an unlock they gain all the capital back with interest
 
         @param dnft_id_: the id of the entity that reputation energy (tokens) staked on it
-        @param amount_: the amount of tokens to remove (could be too much)
     **/
-    function unstakeTokensFromProject(string memory dnft_id_, int64 amount_) external hasProject(dnft_id_) {
-        require(sentTokens[dnft_id_][msg.sender] >= amount_, 'Unable to unstake that amount of tokens from project');
+    function endStakeToProject(string memory dnft_id_) external hasProject(dnft_id_) {
 
-        // Update token state for different projects
-        projects[dnft_id_].balance -= amount_;
-        sentTokens[dnft_id_][msg.sender] -= amount_;
+        StakedPosition storage _position = stakedProjectPositions[dnft_id_][msg.sender];
+
+        require(_position.open, "The staking position must be open in order to end it");
+
+        bool isLocked = _position.unlock_time > block.timestamp;
+
+        // Get from fees contract
+        int64 _penaltyFee = fees.getPenaltyFee(isLocked);
+        int64 _fee = (_position.amount * _penaltyFee) / 100;
+        int64 _unstakeValue = _position.amount - _fee;
+
+        // The unstake value is removed from the project balance and fee retained (to be distributed later)
+        projects[dnft_id_].balance -= _unstakeValue;
+        treasuryTokens += _fee;
+
+        // Calculate additional interest. (this is basic for now - will be dynamic - from treasury)
+        // TODO: base APY is static 25%, the more penalty fees and the treasury bonuses are dropped in this will increase the APY -- will be dynamic
+        if (!isLocked) {
+            _unstakeValue += _unstakeValue * 25 / 100;
+        }
+
+        // close the position (ref the storage object)
+        _position.open = false;
+        _position.amount_on_end = _unstakeValue;
 
         // Send tokens back to user
-        int response = HederaTokenService.transferToken(tokenAddress, address(this), msg.sender, amount_);
+        int response = HederaTokenService.transferToken(tokenAddress, address(this), msg.sender, _unstakeValue);
 
         if (response != HederaResponseCodes.SUCCESS) {
             revert ("Transfer failed to unstake tokens");
         }
 
-        emit Unstaked(msg.sender, dnft_id_, amount_);
+        emit Unstaked(msg.sender, dnft_id_, _unstakeValue);
+    }
+
+    /** @notice Demo application only, not in prod **/
+    function removeTimelockForProject(string memory dnft_id_) external {
+        stakedProjectPositions[dnft_id_][msg.sender].unlock_time = 0;
     }
 
     /** @notice View Methods for reading state **/
@@ -238,6 +277,8 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
     }
 
     /**
+        TODO: TO be rewritten.
+
         @notice work in progress (need to figure out the best way to handle this)
             - For now just expect that the division will happen on the dapp.
 
@@ -264,15 +305,20 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
         return projects[dnft_id_].balance;
     }
 
-    /**
-        @notice for a given entity return the number of tokens staked to it from a user
-    **/
-    function getUserTokensStakedToProject(string memory dnft_id_) external view hasProject(dnft_id_) returns (int64) {
-        return sentTokens[dnft_id_][msg.sender];
+    // Return the current staked position for a given project for a given user.
+    function getStakedPosition(string memory dnft_id_) external view hasProject(dnft_id_) returns (int64, int64, uint, uint, bool) {
+        StakedPosition memory position = stakedProjectPositions[dnft_id_][msg.sender];
+
+        return (
+            position.amount,
+            position.amount_on_end,
+            position.number_of_days,
+            position.unlock_time,
+            position.open
+        );
     }
 
     // Modify fees
-
     function updateEntryStakeFee(int64 fee_) external onlyOwner {
         fees.setStakeFee(fee_);
     }
