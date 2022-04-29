@@ -13,10 +13,10 @@ deploy-test:
 	make test-contract CONTRACT=$(CONTRACT)
 
 ## This is the solidity contract name (example of custom commands)
-CONTRACT = "StakableProject"
+CONTRACT = "TimelockStakableProject"
 
 ## Simply a utility to get the contract into a state that is completely tested and employed given a custom environment/owner, with demo projects
-deploy-test-stakable-base-contract:
+deploy-test-timelockstakable-contract:
 	make deploy CONTRACT=$(CONTRACT)
 	hardhat add-demo-projects
 	make test-contract CONTRACT=$(CONTRACT)
