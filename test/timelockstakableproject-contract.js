@@ -53,6 +53,15 @@ describe("Testing a basic contract for stakable projects", function () {
     expect(accountId.toString()).to.equal(process.env.HEDERA_ACCOUNT_ID);
   })
 
+  it('Should be able to see the maximum claimable tokens', async () => {
+    const response = await hashgraph.contract.query({
+      contractId: contractId,
+      method: "getMaximumClaimableTokens",
+    })
+
+    expect(response.getInt64(0).toNumber()).to.equal(amount);
+  });
+
   it('Owner can add a project to the contract', async () => {
     const response = await hashgraph.contract.call({
       contractId: contractId,
@@ -155,6 +164,22 @@ describe("Testing a basic contract for stakable projects", function () {
     expect(response.getInt64(0).toNumber()).to.equal(baseVerifiedCarbon);
   });
 
+  it('Should be able to get project details', async () => {
+    const response = await hashgraph.contract.query({
+      contractId: contractId,
+      method: "getProjectDetails",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+    })
+
+    // Balance
+    expect(response.getInt64(0).toNumber()).to.equal(0);
+    // Verified Carbon (addition + base value)
+    expect(response.getInt64(1).toNumber()).to.equal(5);
+    // Bool
+    expect(response.getBool(2)).to.be.true;
+  });
+
   it('owner should be able to add verified carbon to project', async () => {
     const response = await hashgraph.contract.call({
       contractId: contractId,
@@ -165,6 +190,22 @@ describe("Testing a basic contract for stakable projects", function () {
     })
 
     expect(response).to.be.true;
+  });
+
+  it('Should be able to get project details with updated carbon', async () => {
+    const response = await hashgraph.contract.query({
+      contractId: contractId,
+      method: "getProjectDetails",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+    })
+
+    // Balance
+    expect(response.getInt64(0).toNumber()).to.equal(0);
+    // Verified Carbon (addition + base value)
+    expect(response.getInt64(1).toNumber()).to.equal(15);
+    // Bool
+    expect(response.getBool(2)).to.be.true;
   });
 
   it('should be able to see the updated verified carbon for a project', async () => {
