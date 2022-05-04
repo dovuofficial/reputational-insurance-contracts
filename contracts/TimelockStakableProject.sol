@@ -322,4 +322,15 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
     function updateEntryStakeFee(int64 fee_) external onlyOwner {
         fees.setStakeFee(fee_);
     }
+
+    // get project details (duplicate of risk collateral with all details)
+    function getProjectDetails(string memory dnft_id_) external view hasProject(dnft_id_) returns (int64, int64, bool) {
+        Project memory _project = projects[dnft_id_];
+
+        return (_project.balance, _project.verified_kgs, _project.created);
+    }
+
+    function getMaximumClaimableTokens() external view returns (int64) {
+        return maximumClaimableTokens;
+    }
 }
