@@ -58,21 +58,21 @@ task("add-demo-projects", "Add initial demo projects to StakableProject ")
     const hashgraph = Hashgraph(client);
     const contractId = process.env.STAKABLEPROJECT_CONTRACT_ID;
 
-    const addProject = async (projectName, address) => {
+    const addProject = async (projectName, baseVerifiedCarbon) => {
       await hashgraph.contract.call({
         contractId: contractId,
         method: "addProject",
         params: new ContractFunctionParameters()
           .addString(projectName)
-          .addAddress(address)
+          .addInt64(baseVerifiedCarbon)
       })
     }
 
     try {
       // TODO: In the future the project name and address will refer to the actual project and the token ID
-      await addProject('farm-one', TokenId.fromString('0.0.1').toSolidityAddress())
-      await addProject('farm-two', TokenId.fromString('0.0.2').toSolidityAddress())
-      await addProject('farm-three', TokenId.fromString('0.0.3').toSolidityAddress())
+      await addProject('farm-one', 1000)
+      await addProject('farm-two', 2000)
+      await addProject('farm-three', 3000)
     } catch (e) {
       console.warn('If you are seeing this these projects have already been deployed onto the contract');
     }

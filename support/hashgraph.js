@@ -179,6 +179,8 @@ const SubscribeToEmittedEvents = async (client, {
       .freezeWith(client)
 
     const contractTransactionResponse = await contractTransaction.execute(client);
+
+    // Failing on get record... (could be a timeout thing)
     const record = await contractTransactionResponse.getRecord(client);
 
     // look through logs returned with getRecord.
