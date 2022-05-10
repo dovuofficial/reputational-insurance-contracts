@@ -15,7 +15,7 @@ const {
 // Random string, for project generation
 const { v4: uuidv4 } = require('uuid');
 
-describe("Testing a basic contract for stakable projects", function () {
+describe("Proof of concept contract for tying reputation to hedera entities with insurance triggers", function () {
 
   const destinationNetwork = Config.network
   const client = Network.getNodeNetworkClient(destinationNetwork)
@@ -378,6 +378,17 @@ describe("Testing a basic contract for stakable projects", function () {
     expect(response).to.be.true;
   });
 
+  it('User checks that they are staked', async () => {
+    const response = await hashgraph.contract.query({
+      contractId: contractId,
+      method: "isUserStakedToProject",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+    })
+
+    expect(response.getBool(0)).to.be.true;
+  });
+
   // TODO: TBC
   // it('User can see the current risk of project, after staking', async () => {
   //   const response = await hashgraph.contract.query({
@@ -459,6 +470,17 @@ describe("Testing a basic contract for stakable projects", function () {
     })
 
     expect(response).to.be.true;
+  });
+
+  it('User checks that they are unstaked', async () => {
+    const response = await hashgraph.contract.query({
+      contractId: contractId,
+      method: "isUserStakedToProject",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+    })
+
+    expect(response.getBool(0)).to.be.false;
   });
 
   it('User can view individual unstaked position of a project', async () => {
@@ -613,37 +635,113 @@ describe("Testing a basic contract for stakable projects", function () {
     expect(amount).to.equal(returnedEvents[0].args.amount);
   });
 
-  // This needs to be last otherwise prev tests will fail due to extra being staked.
-  it('Subscribed successfully to stakeTokensToProject events', async () => {
-
-    const returnedEvents = await hashgraph.contract.sub({
+  it('User restakes tokens to a project that exists (insurance test)', async () => {
+    const response = await hashgraph.contract.call({
       contractId: contractId,
       method: "stakeTokensToProject",
-      contract: "TimelockStakableProject",
       params: new ContractFunctionParameters()
         .addString(account_id)
         .addInt64(tDovExp)
-        .addInt256(364),
-    });
+        .addUint256(364) //days
+    })
 
-    expect(Config.accountId).to.equal(AccountId.fromSolidityAddress(returnedEvents[0].args.sender).toString());
-    expect(account_id).to.equal(returnedEvents[0].args.projectRef);
-    expect(amount).to.equal(returnedEvents[0].args.amount);
+    expect(response).to.be.true;
   });
 
-  // This functions needs to follow stakeTokensToProject events test -> so we can unstake them and not get an err.
-  it('Subscribed successfully to unstakeTokensFromProject events', async () => {
-    const returnedEvents = await hashgraph.contract.sub({
+  it('User can view individual staked position before liquidation (insurance test)', async () => {
+    const response = await hashgraph.contract.query({
       contractId: contractId,
-      method: "endStakeToProject",
-      contract: "TimelockStakableProject",
+      method: "getStakedPosition",
       params: new ContractFunctionParameters()
         .addString(account_id)
-    });
+    })
 
-    expect(Config.accountId).to.equal(AccountId.fromSolidityAddress(returnedEvents[0].args.sender).toString());
-    expect(account_id).to.equal(returnedEvents[0].args.projectRef);
-    expect(amount).to.equal(returnedEvents[0].args.amount);
+    const original = tDovExp
+    const fee = original / 20
+    const actual = original - fee
+
+    // Matches the amount minus fee
+    expect(response.getInt64(0).toNumber()).to.equal(actual);
+
+    // position is currently open
+    expect(response.getBool(4)).to.be.true;
   });
+
+  it('Insurance is triggered (insurance test)', async () => {
+    const response = await hashgraph.contract.call({
+      contractId: contractId,
+      method: "triggerProjectInsuranceLiquidation",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+        .addInt8(10)
+    })
+
+    expect(response).to.be.true;
+  });
+
+  it('User can view individual staked position of a liquidated project (insurance test)', async () => {
+    const response = await hashgraph.contract.query({
+      contractId: contractId,
+      method: "getStakedPosition",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+    })
+
+    const original = tDovExp
+    const fee = original / 20
+    const actual = original - fee
+
+    // Matches the amount minus the liquidation event of 10%
+    expect(response.getInt64(0).toNumber()).to.equal(actual * 0.9);
+
+    // position is currently open
+    expect(response.getBool(4)).to.be.true;
+  });
+
+  it('User unstakes tokens to a project that has liquidated (insurance test)', async () => {
+    const response = await hashgraph.contract.call({
+      contractId: contractId,
+      method: "endStakeToProject",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+    })
+
+    expect(response).to.be.true;
+  });
+
+
+  // TODO: CHARLIE FIX ME PLZ, KTHXBAI SUR, NGMI!!!
+  // This needs to be last otherwise prev tests will fail due to extra being staked.
+  // it('Subscribed successfully to stakeTokensToProject events', async () => {
+  //
+  //   const returnedEvents = await hashgraph.contract.sub({
+  //     contractId: contractId,
+  //     method: "stakeTokensToProject",
+  //     contract: "TimelockStakableProject",
+  //     params: new ContractFunctionParameters()
+  //       .addString(account_id)
+  //       .addInt64(tDovExp)
+  //       .addInt256(364),
+  //   });
+  //
+  //   expect(Config.accountId).to.equal(AccountId.fromSolidityAddress(returnedEvents[0].args.sender).toString());
+  //   expect(account_id).to.equal(returnedEvents[0].args.projectRef);
+  //   expect(amount).to.equal(returnedEvents[0].args.amount);
+  // });
+  //
+  // // This functions needs to follow stakeTokensToProject events test -> so we can unstake them and not get an err.
+  // it('Subscribed successfully to unstakeTokensFromProject events', async () => {
+  //   const returnedEvents = await hashgraph.contract.sub({
+  //     contractId: contractId,
+  //     method: "endStakeToProject",
+  //     contract: "TimelockStakableProject",
+  //     params: new ContractFunctionParameters()
+  //       .addString(account_id)
+  //   });
+  //
+  //   expect(Config.accountId).to.equal(AccountId.fromSolidityAddress(returnedEvents[0].args.sender).toString());
+  //   expect(account_id).to.equal(returnedEvents[0].args.projectRef);
+  //   expect(amount).to.equal(returnedEvents[0].args.amount);
+  // });
 
 });
