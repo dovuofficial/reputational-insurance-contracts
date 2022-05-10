@@ -4,6 +4,7 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 /// @notice Import Hedera-specific HTS interop contracts
 import "./libraries/hashgraph/HederaTokenService.sol";
@@ -20,6 +21,8 @@ import "./StakableFees.sol";
 * Question? Should we used ReentrancyGuard for anything that calls HTS?
 */
 contract TimelockStakableProject is HederaTokenService, Ownable {
+
+    using EnumerableSet for EnumerableSet.AddressSet;
 
     // TODO: Become external, so that it can be imported
     struct Project {
@@ -47,8 +50,15 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
     // When the staking pool has been updated with tokens (fees, penalties, etc)
     event TreasuryDeposit(address indexed sender, int64 amount);
 
+    // Liquidation of a project based off of a percentage and a project (sending to Owner/DAO)
+    event InsuranceLiquidation(address indexed grantee, string projectRef, int64 percentage);
+
     // This is the basic fees contract
     StakableFees internal fees = new StakableFees();
+
+    // Track Stakers for insurance and liquidation purposes
+    // Proof of concept: These are the stakers for a given project, not efficient for production
+    mapping (string => EnumerableSet.AddressSet) stakersForProject;
 
     // Links a Dynamic NFT (dNFT) HTS token id to a project within the contract
     mapping (string => Project) projects;
@@ -191,6 +201,9 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
 
         treasuryTokens += _fee;
 
+        // Add staker to list
+        stakersForProject[dnft_id_].add(msg.sender);
+
         // This sends tokens into the Treasury, however we could have a separate account.
         int response = HederaTokenService.transferToken(tokenAddress, msg.sender, address(this), amount_);
 
@@ -227,6 +240,9 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
         projects[dnft_id_].balance -= _unstakeValue;
         treasuryTokens += _fee;
 
+        // remove staker from list
+        stakersForProject[dnft_id_].remove(msg.sender);
+
         // Calculate additional interest. (this is basic for now - will be dynamic - from treasury)
         // TODO: base APY is static 25%, the more penalty fees and the treasury bonuses are dropped in this will increase the APY -- will be dynamic
         if (!isLocked) {
@@ -250,6 +266,44 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
     /** @notice Demo application only, not in prod **/
     function removeTimelockForProject(string memory dnft_id_) external {
         stakedProjectPositions[dnft_id_][msg.sender].unlock_time = 0;
+    }
+
+    /** @notice Enable the owner to liquidate a portion of a position, to send to the owner/DAO (due to lack of buyers) **/
+    function triggerProjectInsuranceLiquidation(string memory dnft_id_, int8 percentage) external hasProject(dnft_id_) onlyOwner {
+        require(percentage > 0, "The percentage required to liquidate needs to be larger than zero");
+        require(percentage <= 100, "The percentage required needs to be less than 100");
+
+        // fetch the project and stakers
+        Project storage project = projects[dnft_id_];
+        EnumerableSet.AddressSet storage stakers = stakersForProject[dnft_id_];
+
+        // Calculate liquidation damage
+        int64 damage = project.balance * percentage / 100;
+
+        // Reduce project balance
+        project.balance -= damage;
+
+        uint i = 0;
+        uint length = stakers.length();
+        StakedPosition storage position;
+
+        // WARNING: unoptimised, to update the balance of all staked positions
+        for (i; i < length; i++) {
+            position = stakedProjectPositions[dnft_id_][stakers.at(i)];
+
+            if (position.open) {
+                position.amount -= position.amount * percentage / 100;
+            }
+        }
+
+        // This sends tokens into the Treasury, however we could have a separate account.
+        int response = HederaTokenService.transferToken(tokenAddress, address(this), owner(), damage);
+
+        if (response != HederaResponseCodes.SUCCESS) {
+            revert ("Transfer Failed, this failed a liquidation event");
+        }
+
+        emit InsuranceLiquidation(owner(), dnft_id_, damage);
     }
 
     /** @notice View Methods for reading state **/
@@ -321,6 +375,11 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
     // Modify fees
     function updateEntryStakeFee(int64 fee_) external onlyOwner {
         fees.setStakeFee(fee_);
+    }
+
+    // For demo purposes only
+    function isUserStakedToProject(string memory dnft_id_) external view hasProject(dnft_id_) returns (bool) {
+        return stakersForProject[dnft_id_].contains(msg.sender);
     }
 
     // get project details (duplicate of risk collateral with all details)
