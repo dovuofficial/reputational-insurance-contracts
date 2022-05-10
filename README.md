@@ -130,7 +130,21 @@ Part of the demo users may disable the time lock after they have a Staked Positi
     })
 ```
 
+## Insurance Trigger
 
+As part of the demo the owner/DAO Could trigger an insurance payout based off of a project not meeting its requirements.
+
+```javascript
+const response = await hashgraph.contract.call({
+      contractId: contractId,
+      method: "triggerProjectInsuranceLiquidation",
+      params: new ContractFunctionParameters()
+        .addString(account_id)
+        .addInt8(10)
+    })
+```
+
+The balance of a given user can be checked either through the staked position or the API, which should be synced after triggering this event.
 
 See more tales of the contract deployment flow of the parents tooling repository. 
 
