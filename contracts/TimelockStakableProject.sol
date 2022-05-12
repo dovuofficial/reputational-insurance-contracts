@@ -79,6 +79,9 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
     // This is the quantity of demo tokens in the contract treasury
     int64 treasuryTokens = 0;
 
+    // This is the quantity of demo tokens in the contract treasury
+    int64 surrenderedTokens = 0;
+
     // This is the amount of claimable tokens that a user can claim with (doesn't stop HTS transfers)
     // 10 tokens with 8 decimals places. (updating claimable tokens requires calculation for owner calls)
     int64 maximumClaimableTokens = 10 * 10 ** 8;
@@ -237,8 +240,9 @@ contract TimelockStakableProject is HederaTokenService, Ownable {
         int64 _unstakeValue = _position.amount - _fee;
 
         // The unstake value is removed from the project balance and fee retained (to be distributed later)
-        projects[dnft_id_].balance -= _unstakeValue;
+        projects[dnft_id_].balance -= _position.amount;
         treasuryTokens += _fee;
+        surrenderedTokens += _fee;
 
         // remove staker from list
         stakersForProject[dnft_id_].remove(msg.sender);
